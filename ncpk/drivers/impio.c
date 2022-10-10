@@ -17,6 +17,8 @@ int	impdebug 0;
 #endif	/* JC McMillan */
 
 struct netbuf *rathole;		/* net buffer for discards */
+struct netbuf *impi_msg; /* pts to msg being built by imp read */
+int     impi_con;       /* pointer to rawent jsq BBN 3-21-79 */
 
 #ifdef SCCSID
 /* SCCS PROGRAM IDENTIFICATION STRING */
@@ -745,6 +747,7 @@ flushimp()
 	imp_stat.i_flushes++;
 	impread( rathole,net_b_size );
 }
+
 /*name:
 	ihbget
 
@@ -781,4 +784,446 @@ history:
 	initial coding 1/7/75 by Steve Holmgren
 */
 
-ihbget()	/* stands for i                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+ihbget()	/* stands for imp host buffer getter */
+{
+	register struct netbuf *bp;
+	/* called when there is data to buffer from the imp */
+	/* appendb returns 0 if cant get buffer */
+	
+	if( bp=appendb( impi_msg ) )
+	{
+		impi_msg = bp;
+#ifndef BUFMOD
+		impread( bp->b_data, net_b_size);
+#endif BUFMOD
+#ifdef BUFMOD
+		impread( bp->b_loc, 0, net_b_size);
+#endif BUFMOD
+	}
+	else
+	{
+		printf("\nIMP:Flush(No Bfrs)\n");
+		flushimp();
+	}
+	
+}
+
+/*name:
+	hh1
+
+function:
+	To search through host to host protocol messages strip out any
+	that apply to the user ( allocates for now )
+
+algorithm:
+	Looks through each buffer of the message on host to host
+	protocol boundaries for and allocate protocol msg. When
+	one is found, copies the msg into hhmsg and overwrites
+	with host to host nops. Calls allocate with the allocate
+	protocol command with deals with it at the user level.
+	once all the msg has been passed through, it as well as
+	the imp to host leader is passed to the ncpdaemon for further
+	processing.
+
+parameters:
+	none
+
+returns:
+	nothing
+
+globals:
+	impi_msg
+	impi_mlen
+	hhsize[]
+	imp.nrcv
+
+calls:
+	allocate		to deal with allocate commands rcvd from net
+	to_ncp			to send uninteresting protocol to ncpdaemon
+	prt_dbg			to note all flush calls if in debug mode
+	bytesout
+	catmsg
+	imphostlink
+	vectomsg
+
+called by:
+	hh
+
+history:
+
+	initial coding 1/7/75 by Steve Holmgren
+	modified 1/1/77 by Steve Holmgren to simplify and correct bug
+	related to hh protocal crossing buffer boundary
+	changed to_ncp arg jsq bbn 12-6-78
+*/
+
+hh1()
+{
+
+	register int hhcom;
+	register char *sktp;
+	register cnt;
+	static char *daemsg, hhproto [96];
+
+	daemsg = 0;
+	while( impi_mlen > 0  ) {	/* while things in msg */
+#ifndef BUFMOD
+		hhcom = (impi_msg->b_qlink)->b_data[0] & 0377;
+#endif BUFMOD
+#ifdef BUFMOD
+		hhcom = fbbyte(impi_msg->b_qlink->b_loc, 0);
+#endif BUFMOD
+		if( hhcom > NUMHHOPS ) {
+			daemsg = catmsg( daemsg,impi_msg );
+			goto fordaemon;
+		}
+
+		cnt = hhsize[ hhcom ];	/* get bytes in this command */
+		impi_mlen =- cnt;	/* decrement impi_mlen */
+
+		if( bytesout( &impi_msg,&hhproto,cnt,1 ))	/* msg not long enough */
+			impi_mlen = 0;			/* force msg empty */
+		else
+		if( hhcom == hhall && (sktp=imphostlink( hhproto[1]|0200 )) ) {
+			allocate( sktp,&hhproto );
+			continue;
+		}
+		else
+		if( hhcom == hhins && (sktp=imphostlink( hhproto[1]&0177 )) ) {
+			if( (sktp->r_rdproc) &&
+			    ((sktp -> r_rdproc) -> p_stat) ) { /* there ? */
+#ifdef MSG
+				sktp->INS_cnt =+ 1;     /* increment count */
+				if (sktp->itab_p) awake(sktp->itab_p, 0);  /* awake awaiting process */
+#endif MSG
+				psignal( sktp->r_rdproc,SIGINR );
+			}
+			continue;
+		}
+		else
+		if( hhcom == hhinr && (sktp=imphostlink( hhproto[1]|0200 )) ) {
+			if( (sktp->r_rdproc) &&
+			    ((sktp -> r_rdproc) -> p_stat) ) {
+#ifdef MSG
+				sktp->INR_cnt =+ 1;     /* increment count */
+				if (sktp->itab_p) awake(sktp->itab_p, 0);  /* awake awaiting process */
+#endif MSG
+				psignal (sktp -> w_wrtproc, SIGINR);
+			}
+			continue;
+		}
+		else
+		if( hhcom == hhnop )
+			continue;
+
+		vectomsg( &hhproto,cnt,&daemsg,1 );	/* got here then give it to daemon */
+	}
+
+	if( daemsg != 0 )		/* something in msg */
+fordaemon:
+		to_ncp (&imp.nrcv, 5, daemsg);  /* send to daemon */
+}
+
+/*name:
+	allocate
+function:
+	To look over host to host allocate protocol messages .
+	determine whether they are going to ncpdaemon or user
+	send off to ncpdaemon, inc appropriate user fields.
+
+algorithm:
+	if host_link in conn tab
+		if socket flags say to ncpdaemon
+			send to ncpdaemon with imp to host leader
+		else
+			update num of messages alocated
+			update number of bits allocated
+			tell user allocate came in
+			let user run
+
+parameters:
+	allocp 		pointer to a host host allocate
+
+returns:
+	nothing
+
+globals:
+	imp.nrcv
+	sktp->w_msgs=
+	sktp->w_falloc=
+	sktp->w_flags=
+
+calls:
+	vectomsg		to build a msg from vec passed to send to ncp daemon
+	to_ncp			to ship the allocate off to the ncp daemon
+	dpadd (sys)		to add two double precision words
+	wakeup (sys)		to let the user run
+
+called by:
+	hh1
+
+history:
+
+	initial coding 1/7/75 by Steve Holmgren
+	modified to awake "awaiting" processes 8/14/78 S.Y. Chiu
+	changed to_ncp arg jsq bbn 12-6-78
+*/
+
+allocate( skt_ptr,allocp )
+struct wrtskt *skt_ptr;
+{
+
+	/* called from hh1 when a hh allocate is received */
+	register char *ap;
+	register struct wrtskt *sktp;
+	struct netbuf *msgp;
+#ifndef MSG
+	int *sitp;
+#endif MSG
+
+	sktp = skt_ptr;
+	ap = allocp;
+	msgp = 0;
+	if (sktp->w_flags & n_toncp)
+	{
+		vectomsg( allocp,8,&msgp,1 );
+		to_ncp( &imp.nrcv,5,msgp );
+	}
+	else
+	{
+		sktp->w_msgs =+ swab( ap->a_msgs );
+		sktp->w_falloc[0] =+ swab(ap->a_bitshi);
+		dpadd(sktp->w_falloc,swab(ap->a_bitslo));
+		sktp->w_flags =| n_allocwt;
+		wakeup( sktp );
+		/* wake up "await" processes, if any */
+#ifndef MSG
+		sitp = sktp;
+		if (sitp = *(--sitp)) awake(sitp,0);
+#endif MSG
+#ifdef MSG
+		if (sktp->itab_p) awake(sktp->itab_p, 0);
+#endif MSG
+	}
+	
+}
+
+/*name:
+	rmovepad
+
+function:
+	To remove the padding attached to every host host protocol msg
+	and standard message by the imp
+
+algorithm:
+	given a bytesize in number of bytes in that size, calculate
+	the number of 8 bit bytes.
+	set the message length to that size
+	run through the message a buffer at a time subtracting
+	the buffer length from the calculated size. eventually
+	it will go negative, since the number of bytes calculated
+	is less that the actual number of bytes in the msg
+	subtract the number of pad bytes from the last buffer in
+	the message to setthe number of actual number of data bytes
+	then free any remaining buffers.
+	set impi_msg to the new last buffer.
+
+parameters:
+	none
+
+returns:
+	nothing
+
+globals:
+	impi_mlen=
+	impi_msg=
+	impi_msg->b_qlink
+
+calls:
+	swab (sys)		to switch top and bottom bytes
+	freebuf			to release the last buffer from the message
+
+called by:
+	hh
+
+history:
+
+	initial coding 1/7/75 by Steve Holmgren
+	added bytesizes multiple of 8 01/27/78 S. F. Holmgren
+	modified so that impi_mlen is correctly set 8/11/78 S.Y. Chiu
+*/
+
+rmovepad()
+{
+	/*  calculates number of bytes from impleader then runs through impsg buffers
+	    adding up counts until number calculated or end of msg is reached.
+	    sets impcnt tothe min of amt in msg and calculated and discards
+	    any excess bytes  */
+
+	register struct netbuf *bfrp;
+	register cnt;
+
+	impi_mlen = swab( imp.bcnt );		/* get # bytesize bytes */
+	impi_mlen = cnt = (impi_mlen * imp.bsize)/8;        /* turn into 8-bit bytes */
+
+	impi_msg = bfrp = impi_msg->b_qlink;	/* pt at first bfr in msg */
+	while(((cnt =- (bfrp->b_len & 0377)) > 0 )	/*get to last bfr with valid data */
+		&& (bfrp->b_qlink != impi_msg))	/* protect against wrapping around -- JC McMillan */
+	    bfrp = bfrp->b_qlink;
+
+	if (cnt>0)	/* jcm -- note errors */
+	{	printf(" \nIMP:Missing %d B\n", cnt);
+		impi_mlen =- (( cnt*8 ) / impi_sockt->r_bsize );
+	}
+
+	if (cnt < 0)			/* cnt has -(# bytes to discard) */
+		bfrp->b_len = (bfrp->b_len & 0377) + cnt;	/* discard extra bytes this buffer */
+	while( bfrp->b_qlink != impi_msg )	/* while not pting at 1st bfr */
+		freebuf(bfrp);
+	impi_msg = bfrp;				/* set new handle on msg */
+}
+
+/*name:
+	imphostlink
+
+function:
+	Checks to see if the current host and link are in the connection
+	table (conn tab). Checks to see if the socket is open, if so
+	returns a pointer to the socket. If not in conn tab or socket
+	not open returns zero
+
+algorithm:
+	if host link in conn tab
+		if skt open
+			return socket ptr
+
+	return zero
+
+parameters:
+	link			link to be checked with current host
+
+returns:
+	zero 			if not in conn tab or socket not open
+	socket ptr		if in conn tab and socket open
+
+globals:
+	imp.host
+	sktp->r_flags
+
+calls:
+	incontab		to see if host link is in conn tab
+
+called by:
+	hh1
+	imp_input
+	siguser
+
+history:
+
+	initial coding 1/7/75 by Steve Holmgren
+*/
+
+imphostlink( link )
+char link;
+{
+	register sktp;
+	if( sktp = incontab( (link & 0377), 0 ))
+	{
+		sktp = sktp->c_siptr;		/* contab returns ptr to entry
+						   must get skt pointer
+						*/
+			return( sktp );
+	}
+	return( 0 );
+}
+
+/*name:
+	imp_dwn
+
+function:
+	clean up ncp data structures so that an ncpdaemon restart will
+	work correctly.
+
+algorithm:
+	reset the imp interface
+	free any input message
+	clean up input variables
+	clear out all messages queued for the output side
+	reset any rfnm bits
+	let the kernel buffer code clean up its own
+
+parameters:
+	none
+
+returns:
+	nothing
+
+globals:
+	impi_msg =
+	impi_mlen =
+	impi_sockt =
+	impi_con
+	impi_flush =
+	impotab (forward and backward links)
+	host_map[-] =
+
+calls:
+	freemsg
+	ncp_bfrdwn
+	imp_reset
+	printf
+	host_clean
+
+called by:
+	imp_open
+
+history:
+	initial coding 6/22/76 by S. F. Holmgren
+	modified 4/1/77, S.M. Abraham to fix bug in loop that frees
+	all msgs in output queue. It wasn't resetting the msg ptr
+	to the next msg in the queue.
+	printf changed to 'NCP' from 'IMP' 31AUG77 JSK
+	long host mods jsq bbn 1-30-79
+	clear impi_con jsq BBN 3-21-79
+*/
+imp_dwn()
+{
+	register char *p;
+	register int *q;
+
+	/* reset the imp interface */
+	imp_reset();		/* JSK */
+
+	/* cleanup the input side */
+	freemsg( impi_msg );
+	impi_msg = impi_mlen = impi_sockt = impi_con = impi_flush =  0;
+
+	/* clean up the output side */
+	impotab.d_active = 0;
+	/* get rid of messages waiting to be output */
+#ifndef BUFMOD
+	p = impotab.d_actf;
+	while (p)
+	{
+		if( p->b_flags & B_SPEC )	/* this a net message */
+			freemsg( p->b_dev );	/* free it */
+		else
+			iodone( p );		/* sys buffer say done */
+		p = p -> b_forw;		/* pt to next msg */
+	}
+#endif BUFMOD
+#ifdef BUFMOD
+	freemsg(impotab.d_actf);
+#endif BUFMOD
+	impotab.d_actf = impotab.d_actl = 0;
+
+#ifdef NCP
+	/* clear out any waiting rfnm bits */
+	host_clean(&host_map);
+#endif NCP
+
+	printf("\nNCP:Down!\n");	/*JCM & JSK*/
+
+	/* let the net message software clean up */
+	ncp_bfrdwn();
+}

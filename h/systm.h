@@ -14,6 +14,9 @@ int	cputype;		/* type of cpu =40, 45, or 70 */
 int	execnt;			/* number of processes in exec */
 int	lbolt;			/* time of day in 60th not in time */
 int	time[2];		/* time in sec from 1970 */
+int	fastime[2];		/* time in 1/60ths of sec */
+int	tout[2];		/* time of day of next sleep */
+
 /*
  * The callout structure is for
  * a routine arranging

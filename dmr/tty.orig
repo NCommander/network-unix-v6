@@ -51,7 +51,7 @@ struct {
 	int tttbuf;
 };
 
-
+
 /*
  * routine called on first teletype open.
  * establishes a process group for distribution
@@ -101,7 +101,7 @@ struct tty *atp;
 
 }
 
-
+
 /*
  * The routine implementing the gtty system call.
  * Just call lower level routine and pass back values.
@@ -136,7 +136,7 @@ stty()
 	sgtty(0);
 }
 
-
+
 /*
  * Stuff common to stty and gtty.
  * Check legality and switch out to individual
@@ -161,7 +161,7 @@ int *v;
 	(*cdevsw[ip->i_addr[0].d_major].d_sgtty)(ip->i_addr[0], v);
 }
 
-
+
 /*
  * Wait for output to drain, then flush input waiting.
  */
@@ -180,7 +180,7 @@ struct tty *atp;
 	spl0();
 }
 
-
+
 /*
  * Initialize clist by freeing all character blocks, then count
  * number of character devices. (Once-only routine)
@@ -202,7 +202,7 @@ cinit()
 	nchrdev = ccp;
 }
 
-
+
 /*
  * flush all TTY queues
  */
@@ -223,7 +223,7 @@ struct tty *atp;
 }
 
 
-
+
 /*
  * Place a character on can TTY input queue, putting in delimiters
  * and waking up top half as needed.
@@ -235,12 +235,9 @@ struct tty *atp;
 /* Echo places a character on the appropriate tty's output queue, and starts
  * it up. Also, some processing to output certain control characters is done */
 
-echo(ac,tp)
-struct tty *tp;
+echo(ac,atp)
+register struct tty *atp;
 {
-	register struct tty *atp;
-	atp = tp;
-
 	if (ac < 0 || ((atp->t_flags & ECHO) == 0)) return;
 	if (ac <= 037 && (ac < 07 || ac > 012))
 	    {
@@ -251,24 +248,18 @@ struct tty *tp;
 	ttstart(atp);
 }
 
-echostr(s,atp)
-char *s;
-struct tty *atp;
+echostr(s,tp)
+register char *s;
+register struct tty *tp;
 {
-	register struct tty *tp;
-	tp = atp;
-
 	if ((tp->t_flags & ECHO) == 0) return;
 	while(*s) putc(*s++,&tp->t_outq);
 	ttstart(tp);
 }
 
-ttcursor(x,y,atp)
-struct tty *atp;
+ttcursor(x,y,tp)
+register struct tty *tp;
 {
-	register struct tty *tp;
-	tp = atp;
-
 	if ((tp->t_flags & ECHO) == 0) return;
 	echostr("\033Y",tp);		/* escape sequence */
 	putc(x+040,&tp->t_outq);	/* row */
@@ -278,13 +269,11 @@ struct tty *atp;
 	tp->t_col = y;
 }
 
-ttretype(atp)
-struct tty *atp;
+ttretype(tp)
+register struct tty *tp;
 {
-	register struct tty *tp;
 	register cptr;
 
-	tp = atp;
 	cptr = tp->t_llf;		/* start from end of last line */
 
 /*	if ((cptr = tp->t_llf) == 0)
@@ -305,7 +294,7 @@ char *tterase "\b \b";
 char *ttclear "\033H\033J";
 char *ttforw "\033C";
 char *ttkill "\033K";
-
+
 ttyinput(ac,atp)
 struct tty *atp;
 {
@@ -525,7 +514,7 @@ struct tty *atp;
 	    }
 	return;						/* (Implied return anyway) */
 }
-
+
 /*
  * put character on TTY output queue, adding delays,
  * expanding tabs, and handling the CR/NL bit.
@@ -681,6 +670,7 @@ struct tty *tp;
 }
 
 
+
 /*
  * Restart typewriter output following a delay
  * timeout.
@@ -737,6 +727,7 @@ struct tty *atp;
 	PS->integ = sps;
 }
 
+
 /*
  * Called from device's read routine after it has
  * calculated the tty-structure given as argument.
@@ -793,23 +784,20 @@ struct tty *atp;
 	    }
 }
 
-/*
+/*
  * wakes up process waiting for an acknowledge if the
  * ACKWAIT bit in t_state is still set.
  */
-ttywakeup(tp)
-struct tty *tp;
+ttywakeup(atp)
+register struct tty *atp;
 {
-	register struct tty *atp;
-	atp = tp;
-
 	if (atp->t_state & ACKWAIT)
 	     {
 		atp->t_state =& ~ACKWAIT;
 		wakeup(&atp->t_acnt);
 	     }
 }
-
+
 /*
  * Called from the device's write routine after it has
  * calculated the tty-structure given as argument.
@@ -851,6 +839,7 @@ struct tty *atp;
 	ttstart(tp);
 }
 
+
 /*
  * Common code for gtty and stty functions on typewriters.
  * If v is non-zero then gtty is being done and information is
@@ -880,6 +869,7 @@ int *atp, *av;
 	return(0);
 }
 
+
 /* common code for ttymode handlers */
 
 ttmode(atp,acp)
